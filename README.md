@@ -105,11 +105,12 @@ python src/blockchain.py
 
 - **Search coverage**: SerpApi's reverse image search returns whatever Google
   has indexed; it may not find a match for private/unindexed photos, or may
-  return visually-similar-but-different-person images. `pipeline.py` takes
-  the top hit as the "match" without independently re-running face
-  recognition on the candidate's image (Google doesn't always return a
-  directly downloadable image URL for arbitrary social posts) — this is a
-  reasonable next improvement.
+  return visually-similar-but-different-person images. The pipeline downloads
+  each candidate image when an image URL is available and independently
+  verifies its detected faces against the input. Candidates without a
+  downloadable image, a detected face, or a close enough face distance are
+  rejected. If no candidate passes, the pipeline stops without recording a
+  match.
 - **Simulated blockchain**: not a distributed ledger — it proves internal
   tamper-evidence (any edit to `data/chain.json` breaks `is_valid()`), but
   doesn't provide the decentralization/censorship-resistance guarantees of a

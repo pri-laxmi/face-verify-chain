@@ -30,10 +30,13 @@ def run_pipeline(image_path: str):
     print(f"      Face found at {location}")
 
     print("[2/3] Searching the web for matching content (SerpApi reverse image search) ...")
-    uploaded_url, results = find_matching_post(image_path)
+    uploaded_url, results = find_matching_post(image_path, encoding)
     top_hit = results[0]
     print(f"      Uploaded scan to: {uploaded_url}")
-    print(f"      Top match: {top_hit['title']} -> {top_hit['link']}")
+    print(
+        f"      Verified match (distance {top_hit['face_distance']:.3f}): "
+        f"{top_hit['title']} -> {top_hit['link']}"
+    )
 
     print("[3/3] Recording the discovered post on the simulated blockchain ...")
     record = {
@@ -41,6 +44,8 @@ def run_pipeline(image_path: str):
         "matched_post_title": top_hit["title"],
         "matched_post_link": top_hit["link"],
         "matched_post_source": top_hit["source"],
+        "matched_image_url": top_hit["verified_image_url"],
+        "face_distance": top_hit["face_distance"],
         "face_encoding_fingerprint": fingerprint_data({"encoding": encoding.tolist()}),
         "recorded_at": time.time(),
     }

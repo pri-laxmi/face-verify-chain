@@ -23,7 +23,12 @@ point this at photos of people who haven't agreed to be looked up.
 """
 
 import os
+from io import BytesIO
+
+import face_recognition
 import requests
+
+from face_id import compare_faces
 
 IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload"
 SERPAPI_URL = "https://serpapi.com/search.json"
@@ -79,6 +84,7 @@ def reverse_image_search(image_url: str, max_results: int = 10):
             "title": item.get("title"),
             "link": item.get("link"),
             "source": item.get("source"),
+            "image_url": item.get("original") or item.get("image"),
             "thumbnail": item.get("thumbnail"),
         })
 
@@ -88,17 +94,59 @@ def reverse_image_search(image_url: str, max_results: int = 10):
     return results
 
 
-def find_matching_post(image_path: str, max_results: int = 10):
+def verify_candidate_results(results, reference_encoding, threshold: float = 0.6):
+    """Return only candidates whose downloaded image contains a matching face."""
+    verified = []
+
+    for candidate in results:
+        image_urls = [candidate.get("image_url"), candidate.get("thumbnail")]
+        image_urls = [url for url in image_urls if url]
+
+        for image_url in dict.fromkeys(image_urls):
+            try:
+                response = requests.get(image_url, timeout=30)
+                response.raise_for_status()
+                image = face_recognition.load_image_file(BytesIO(response.content))
+                locations = face_recognition.face_locations(image)
+                encodings = face_recognition.face_encodings(
+                    image, known_face_locations=locations
+                )
+            except (requests.RequestException, OSError, ValueError):
+                continue
+
+            if not encodings:
+                continue
+
+            matches = [compare_faces(reference_encoding, encoding, threshold) for encoding in encodings]
+            is_match, distance = min(matches, key=lambda result: result[1])
+            if is_match:
+                verified.append({
+                    **candidate,
+                    "verified_image_url": image_url,
+                    "face_distance": distance,
+                })
+                break
+
+    return verified
+
+
+def find_matching_post(
+    image_path: str,
+    reference_encoding,
+    max_results: int = 10,
+    threshold: float = 0.6,
+):
     """
     Full step-2 flow: upload the local image, run a reverse image
-    search against the live web, and return the raw candidate results.
-    Verifying that a candidate actually contains the same face is left
-    to the caller (pipeline.py), which re-runs face_id on the top
-    candidate's image where possible.
+    search, download candidate images, and keep only candidates whose
+    detected face matches the input encoding.
     """
     public_url = upload_image_get_url(image_path)
-    results = reverse_image_search(public_url, max_results=max_results)
-    return public_url, results
+    candidates = reverse_image_search(public_url, max_results=max_results)
+    verified = verify_candidate_results(candidates, reference_encoding, threshold)
+    if not verified:
+        raise SearchError("No candidate image contained a matching face")
+    return public_url, verified
 
 
 if __name__ == "__main__":
@@ -109,6 +157,13 @@ if __name__ == "__main__":
         print("Usage: python web_search.py <image_path>")
         sys.exit(1)
 
-    url, hits = find_matching_post(sys.argv[1])
+    import face_recognition
+
+    reference_image = face_recognition.load_image_file(sys.argv[1])
+    reference_locations = face_recognition.face_locations(reference_image)
+    reference_encoding = face_recognition.face_encodings(
+        reference_image, known_face_locations=reference_locations
+    )[0]
+    url, hits = find_matching_post(sys.argv[1], reference_encoding)
     print(f"Uploaded to: {url}")
     print(json.dumps(hits, indent=2))
